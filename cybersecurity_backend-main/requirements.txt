@@ -1,0 +1,13 @@
+fastapi
+uvicorn
+python-nmap
+requests
+beautifulsoup4
+pydantic[email]
+google-generativeai
+motor
+pymongo
+python-dotenv
+python-jose[cryptography]
+passlib[bcrypt]
+python-multipart
