@@ -22,6 +22,7 @@ scan_results_collection = db["scan_results"]
 audit_logs_collection = db["audit_logs"]
 user_feedback_collection = db["user_feedback"]
 vulnerability_coverage_collection = db["vulnerability_coverage"]
+scan_chats_collection = db["scan_chats"]
 
 async def init_db():
     """Initialize database indexes for performance."""
@@ -51,6 +52,10 @@ async def init_db():
     # Create indexes for vulnerability coverage
     await vulnerability_coverage_collection.create_index("scan_id")
     await vulnerability_coverage_collection.create_index("timestamp")
+
+    # Create indexes for scan chats
+    await scan_chats_collection.create_index("scan_id")
+    await scan_chats_collection.create_index("user_id")
 
 def get_db():
     """Return database instance."""

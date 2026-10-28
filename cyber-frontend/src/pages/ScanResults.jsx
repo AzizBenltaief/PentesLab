@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import Layout from '../components/Layout';
+import Markdown from '../components/Markdown';
 import { scanAPI } from '../services/api';
 import { 
   ArrowLeft, 
@@ -479,112 +480,8 @@ const ScanResults = () => {
 
                 <div className="max-w-none">
                   {scan.results.ai_report ? (
-                    <div className="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden">
-                      <div 
-                        className="markdown-report p-8"
-                        dangerouslySetInnerHTML={{
-                          __html: (() => {
-                            let html = scan.results.ai_report;
-                            
-                            // Replace emojis first
-                            html = html.replace(/🔴/g, '<span class="text-red-600 font-bold">🔴</span>');
-                            html = html.replace(/🟠/g, '<span class="text-orange-500 font-bold">🟠</span>');
-                            html = html.replace(/🟡/g, '<span class="text-yellow-500 font-bold">🟡</span>');
-                            html = html.replace(/🟢/g, '<span class="text-green-600 font-bold">🟢</span>');
-                            html = html.replace(/✅/g, '<span class="text-green-600">✅</span>');
-                            html = html.replace(/❌/g, '<span class="text-red-600">❌</span>');
-                            html = html.replace(/⚠️/g, '<span class="text-yellow-600">⚠️</span>');
-                            
-                            // Replace code blocks
-                            html = html.replace(/`([^`]+)`/g, '<code class="bg-gray-100 px-2 py-1 rounded text-sm font-mono text-blue-600">$1</code>');
-                            
-                            // Replace bold text (anywhere in line, not just start)
-                            html = html.replace(/\*\*([^*]+)\*\*/g, '<strong class="font-semibold text-gray-900">$1</strong>');
-                            
-                            // Split by lines for processing
-                            const lines = html.split('\n');
-                            const processedLines = lines.map(line => {
-                              // Skip empty lines
-                              if (line.trim() === '') return '<br/>';
-                              
-                              // Headers
-                              if (line.match(/^# /)) {
-                                return line.replace(/^# (.*)$/, '<h1 class="text-3xl font-bold text-gray-900 mb-6 pb-4 border-b-2 border-blue-500">$1</h1>');
-                              }
-                              if (line.match(/^## /)) {
-                                return line.replace(/^## (.*)$/, '<h2 class="text-2xl font-semibold text-gray-800 mt-8 mb-4 pb-2 border-b border-gray-300">$1</h2>');
-                              }
-                              if (line.match(/^### /)) {
-                                return line.replace(/^### (.*)$/, '<h3 class="text-xl font-semibold text-gray-700 mt-6 mb-3">$1</h3>');
-                              }
-                              
-                              // Horizontal rules
-                              if (line.match(/^---+$/)) {
-                                return '<hr class="my-8 border-t-2 border-gray-300" />';
-                              }
-                              
-                              // Unordered lists
-                              if (line.match(/^  - /)) {
-                                return '<li class="ml-10 mb-1 text-gray-700 list-disc">' + line.replace(/^  - /, '') + '</li>';
-                              }
-                              if (line.match(/^- /)) {
-                                return '<li class="ml-6 mb-2 text-gray-700 list-disc">' + line.replace(/^- /, '') + '</li>';
-                              }
-                              
-                              // Ordered lists
-                              if (line.match(/^[0-9]+\. /)) {
-                                return '<li class="ml-6 mb-2 text-gray-700">' + line.replace(/^[0-9]+\. /, '') + '</li>';
-                              }
-                              
-                              // Italic text (for emphasis)
-                              line = line.replace(/\*([^*]+)\*/g, '<em class="italic text-gray-600">$1</em>');
-                              
-                              // Regular paragraph
-                              return '<p class="mb-3 text-gray-700 leading-relaxed">' + line + '</p>';
-                            });
-                            
-                            return processedLines.join('\n');
-                          })()
-                        }}
-                      />
-                      <style>{`
-                        .markdown-report h1 {
-                          color: #1e3a8a;
-                          margin-top: 0;
-                        }
-                        .markdown-report h2 {
-                          color: #1e40af;
-                          scroll-margin-top: 2rem;
-                        }
-                        .markdown-report h3 {
-                          color: #1e40af;
-                          scroll-margin-top: 2rem;
-                        }
-                        .markdown-report li {
-                          list-style-type: disc;
-                          list-style-position: outside;
-                          line-height: 1.6;
-                        }
-                        .markdown-report strong {
-                          color: #111827;
-                          font-weight: 600;
-                        }
-                        .markdown-report code {
-                          background-color: #f3f4f6;
-                          padding: 0.125rem 0.375rem;
-                          border-radius: 0.25rem;
-                          font-size: 0.875rem;
-                          font-family: 'Courier New', monospace;
-                        }
-                        .markdown-report hr {
-                          margin: 2rem 0;
-                          border-color: #d1d5db;
-                        }
-                        .markdown-report p {
-                          margin-bottom: 1rem;
-                          line-height: 1.7;
-                        }
-                      `}</style>
+                    <div className="bg-white border border-gray-200 rounded-lg shadow-sm p-8">
+                      <Markdown>{scan.results.ai_report}</Markdown>
                     </div>
                   ) : (
                     <div className="bg-white border border-gray-200 rounded-lg p-8 text-center">

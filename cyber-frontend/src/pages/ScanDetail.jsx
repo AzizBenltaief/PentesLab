@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import Layout from '../components/Layout';
+import CopilotPanel from '../components/CopilotPanel';
 import { scanAPI } from '../services/api';
 import { ArrowLeft, Activity, CheckCircle, XCircle, Clock, AlertCircle } from 'lucide-react';
 
@@ -205,6 +206,13 @@ const ScanDetail = () => {
             </div>
           )}
         </div>
+
+        {/* AI Security Copilot */}
+        {scan.status === 'completed' && (
+          <div className="mt-6 mb-8">
+            <CopilotPanel scanId={id} />
+          </div>
+        )}
       </div>
     </Layout>
   );

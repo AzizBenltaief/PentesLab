@@ -3,12 +3,16 @@ from datetime import datetime
 from typing import Dict, Any
 
 
-async def run_reporting(scan_results: Dict[str, Any]) -> str:
+async def run_reporting(scan_results: Dict[str, Any], target: str = "") -> str:
     """
-    Generate professional security report without AI.
+    Generate the pentest report: AI-generated when the Groq agent is
+    available, deterministic template otherwise (graceful fallback).
     Returns a comprehensive markdown-formatted report.
     """
-    return generate_professional_report(scan_results)
+    from agent.report_agent import generate_ai_report
+
+    fallback = generate_professional_report(scan_results)
+    return await generate_ai_report(scan_results, target=target, fallback_report=fallback)
 
 
 def generate_professional_report(scan_results: Dict[str, Any]) -> str:

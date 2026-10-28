@@ -45,6 +45,8 @@ async def run_footprinting(target_url: str, scan_results: Dict[str, Any], log_ca
             "security_headers": security_headers_check,
             "all_headers": dict(headers)
         }
+        # Legacy alias consumed by openvas_integration and web_scanning heuristics
+        scan_results["results"]["headers"] = dict(headers)
                 
     except Exception as e:
         log_callback(f"Footprinting error: {str(e)}")

@@ -44,9 +44,12 @@ from utils.db import (
     scan_results_collection,
     audit_logs_collection,
     user_feedback_collection,
-    vulnerability_coverage_collection
+    vulnerability_coverage_collection,
+    scan_chats_collection
 )
 from utils.coverage_calculator import calculate_vulnerability_coverage, get_coverage_summary
+from agent.copilot import answer_scan_question, analyze_scan
+from agent.llm import LLMNotAvailableError, llm_available
 
 app = FastAPI(
     title="PENTESTLAB API",
@@ -113,6 +116,10 @@ class ScanStatus(BaseModel):
     results: Dict
     execution_time: Optional[int] = None
     success_rate: Optional[int] = None
+
+class ChatRequest(BaseModel):
+    question: str
+    history: Optional[List[Dict]] = None
 
 # ============== AUTHENTICATION ENDPOINTS ==============
 
@@ -515,7 +522,7 @@ async def run_pentest_workflow(scan_id: str, target: str, project_id: Optional[s
         scans[scan_id]["step"] = 8
         scans[scan_id]["logs"].append("Phase 8: Generating AI-powered report")
         try:
-            report = await run_reporting(scans[scan_id]["results"])
+            report = await run_reporting(scans[scan_id]["results"], target=target)
             scans[scan_id]["results"]["ai_report"] = report
         except Exception as e:
             log_callback(f"AI Report generation skipped: {str(e)}")
@@ -628,7 +635,8 @@ async def start_scan(
         "results": {},
         "user_id": current_user.user_id,
         "username": current_user.username,
-        "project_id": project_id
+        "project_id": project_id,
+        "target_url": target
     }
     
     # Log scan start
@@ -1073,4 +1081,212 @@ async def get_my_feedback(
             }
             for f in my_feedback
         ]
+    }
+
+# ============== NEW ENDPOINTS: AI SECURITY COPILOT ==============
+
+async def _resolve_scan_for_user(scan_id: str, user_id: str) -> Optional[Dict]:
+    """Locate a scan (in-memory running or completed in MongoDB) and verify ownership.
+
+    Returns a dict with target, results, vulns, status - or None if not found.
+    Raises 403 HTTPException if the scan belongs to another user.
+    """
+    # Running scans live in memory
+    if scan_id in scans:
+        scan = scans[scan_id]
+        if scan.get("user_id") != user_id:
+            raise HTTPException(status_code=403, detail="Not authorized to view this scan")
+        return {
+            "target": scan.get("target_url", ""),
+            "results": scan.get("results", {}),
+            "vulns": scan.get("vulns", 0),
+            "status": scan.get("status", "running")
+        }
+
+    # Completed scans live in MongoDB
+    scan_result = await scan_results_collection.find_one({"id": scan_id})
+    if not scan_result:
+        return None
+
+    if scan_result.get("user_id") != user_id:
+        raise HTTPException(status_code=403, detail="Not authorized to view this scan")
+
+    return {
+        "target": scan_result.get("target_url", ""),
+        "results": scan_result.get("scan_data", {}),
+        "vulns": scan_result.get("vulns_count", 0),
+        "status": scan_result.get("status", "completed")
+    }
+
+
+@app.get("/scan/{scan_id}/chat/history")
+async def get_chat_history(
+    scan_id: str,
+    current_user: TokenData = Depends(get_current_active_user)
+):
+    """Get persisted copilot conversation for a scan."""
+    scan = await _resolve_scan_for_user(scan_id, current_user.user_id)
+    if not scan:
+        raise HTTPException(status_code=404, detail="Scan not found")
+
+    chat_doc = await scan_chats_collection.find_one({
+        "scan_id": scan_id,
+        "user_id": current_user.user_id
+    })
+
+    return {
+        "scan_id": scan_id,
+        "messages": (chat_doc or {}).get("messages", [])
+    }
+
+
+@app.post("/scan/{scan_id}/chat")
+async def chat_with_copilot(
+    scan_id: str,
+    chat_request: ChatRequest,
+    request: Request,
+    current_user: TokenData = Depends(get_current_active_user)
+):
+    """Ask the AI copilot a question about a specific scan's results."""
+    question = chat_request.question.strip()
+    if not question:
+        raise HTTPException(status_code=400, detail="Question cannot be empty")
+    if len(question) > 2000:
+        raise HTTPException(status_code=400, detail="Question too long (max 2000 characters)")
+
+    # Cap client-provided history to the last 12 messages
+    history = (chat_request.history or [])[-12:]
+
+    scan = await _resolve_scan_for_user(scan_id, current_user.user_id)
+    if not scan:
+        raise HTTPException(status_code=404, detail="Scan not found")
+
+    if not scan["results"]:
+        # No results at all yet
+        raise HTTPException(
+            status_code=409,
+            detail="Scan has no results yet. Ask again once the first phases have completed."
+        )
+
+    if not llm_available():
+        raise HTTPException(
+            status_code=503,
+            detail="AI Copilot is not available (GROQ_API_KEY not configured on the server)."
+        )
+
+    try:
+        answer = await answer_scan_question(
+            question=question,
+            scan_results=scan["results"],
+            target=scan["target"],
+            history=history
+        )
+    except LLMNotAvailableError as e:
+        raise HTTPException(status_code=502, detail=f"AI Copilot error: {str(e)}")
+
+    # Persist conversation
+    now = datetime.utcnow()
+    new_messages = [
+        {"role": "user", "content": question, "timestamp": now},
+        {"role": "assistant", "content": answer, "timestamp": now}
+    ]
+    await scan_chats_collection.update_one(
+        {"scan_id": scan_id, "user_id": current_user.user_id},
+        {
+            "$push": {"messages": {"$each": new_messages}},
+            "$set": {"updated_at": now},
+            "$setOnInsert": {"created_at": now}
+        },
+        upsert=True
+    )
+
+    await AuditLogger.log_action(
+        user_id=current_user.user_id,
+        username=current_user.username,
+        action="copilot_chat",
+        resource_type="scan",
+        resource_id=scan_id,
+        details={"question_length": len(question)},
+        ip_address=request.client.host
+    )
+
+    return {
+        "scan_id": scan_id,
+        "answer": answer,
+        "messages": new_messages
+    }
+
+
+@app.get("/scan/{scan_id}/analysis")
+async def get_ai_analysis(
+    scan_id: str,
+    request: Request,
+    force: bool = False,
+    current_user: TokenData = Depends(get_current_active_user)
+):
+    """Get (or generate) the AI triage analysis for a scan.
+
+    Results are cached on the scan document; use ?force=true to regenerate.
+    """
+    scan = await _resolve_scan_for_user(scan_id, current_user.user_id)
+    if not scan:
+        raise HTTPException(status_code=404, detail="Scan not found")
+
+    if not llm_available():
+        raise HTTPException(
+            status_code=503,
+            detail="AI Copilot is not available (GROQ_API_KEY not configured on the server)."
+        )
+
+    # Serve cached analysis from MongoDB when available
+    if not force:
+        scan_result = await scan_results_collection.find_one(
+            {"id": scan_id},
+            {"ai_analysis": 1}
+        )
+        cached = (scan_result or {}).get("ai_analysis")
+        if cached and cached.get("content"):
+            return {
+                "scan_id": scan_id,
+                "analysis": cached["content"],
+                "generated_at": cached.get("generated_at"),
+                "cached": True
+            }
+
+    try:
+        analysis = await analyze_scan(
+            scan_results=scan["results"],
+            target=scan["target"]
+        )
+    except LLMNotAvailableError as e:
+        raise HTTPException(status_code=502, detail=f"AI Copilot error: {str(e)}")
+
+    generated_at = datetime.utcnow()
+
+    # Cache on the MongoDB scan document (skip for scans not yet persisted)
+    await scan_results_collection.update_one(
+        {"id": scan_id},
+        {"$set": {
+            "ai_analysis": {
+                "content": analysis,
+                "generated_at": generated_at
+            }
+        }}
+    )
+
+    await AuditLogger.log_action(
+        user_id=current_user.user_id,
+        username=current_user.username,
+        action="copilot_analysis",
+        resource_type="scan",
+        resource_id=scan_id,
+        details={"force": force},
+        ip_address=request.client.host
+    )
+
+    return {
+        "scan_id": scan_id,
+        "analysis": analysis,
+        "generated_at": generated_at,
+        "cached": False
     }

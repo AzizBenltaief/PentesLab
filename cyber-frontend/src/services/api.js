@@ -56,6 +56,9 @@ export const projectAPI = {
 export const scanAPI = {
   start: (data) => api.post('/scan', data),
   getStatus: (scanId) => api.get(`/status/${scanId}`),
+  chat: (scanId, data) => api.post(`/scan/${scanId}/chat`, data),
+  getChatHistory: (scanId) => api.get(`/scan/${scanId}/chat/history`),
+  getAnalysis: (scanId, force = false) => api.get(`/scan/${scanId}/analysis`, { params: { force } }),
 };
 
 // Metrics APIs
